@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Админ-панель</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px system-ui, sans-serif; color: #001845; background: #ebf2f7; }
+    main { width: min(420px, calc(100% - 32px)); padding: 28px; text-align: center; background: #fff; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,24,69,.12); }
+    img { width: 150px; margin-bottom: 18px; }
+    #status { color: #667085; }
+    #status.error { color: #d92d20; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/static/logo.svg" alt="Logo">
+    <h1>Админ-панель</h1>
+    <p id="status">Проверяем Telegram-аккаунт сотрудника…</p>
+  </main>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/static/miniapp.js"></script>
+</body>
+</html>

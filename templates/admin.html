@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page == 'login' %}Вход{% elif page in ['employees', 'employee_form'] %}Сотрудники{% elif page == 'users_groups' %}Пользователи и Подключенные группы{% elif page in ['requests', 'request_detail'] %}Запросы{% else %}База знаний{% endif %}</title>
+  <style>
+    :root {
+      --page-bg: #ebf2f7;
+      --surface: #ffffff;
+      --surface-soft: #f8f9fa;
+      --text: #001845;
+      --text-subtle: #667085;
+      --text-muted: #98a2b3;
+      --accent: #00b8d7;
+      --accent-soft: #e2f3ff;
+      --border: #eaecf0;
+      --danger: #d92d20;
+      --danger-soft: #fef3f2;
+      --success: #087443;
+      --success-soft: #ecfdf3;
+      --warning: #b54708;
+      --warning-soft: #fffaeb;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; color: var(--text); background: var(--page-bg); }
+    a { color: inherit; }
+    button, input, textarea, select { font: inherit; }
+    button, .button { border: 0; cursor: pointer; }
+    .login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 20% 20%, #fff 0, #ebf2f7 45%, #dceaf2 100%); }
+    .login-card { width: min(420px, 100%); padding: 36px; background: rgba(255,255,255,.88); border: 1px solid rgba(71,85,105,.1); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,24,69,.1); }
+    .login-card img { width: 134px; height: auto; margin-bottom: 30px; }
+    .login-card h1 { margin: 0 0 8px; font-size: 25px; letter-spacing: -.02em; }
+    .muted { color: var(--text-subtle); }
+    .error { margin: 16px 0; padding: 12px 14px; color: var(--danger); background: var(--danger-soft); border: 1px solid #fecdca; border-radius: 8px; }
+    .field-label { display: block; margin: 20px 0 7px; color: var(--text-subtle); font-size: 13px; font-weight: 600; }
+    input, textarea, select { width: 100%; padding: 11px 13px; color: var(--text); background: #fff; border: 1px solid #d0d5dd; border-radius: 8px; outline: none; transition: border-color .2s, box-shadow .2s; }
+    textarea { min-height: 150px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,184,215,.13); }
+    .admin-shell { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: fixed; z-index: 2; inset: 0 auto 0 0; width: 250px; display: grid; grid-template-rows: 64px 1fr 56px; background: rgba(255,255,255,.72); border-right: 1px solid rgba(71,85,105,.1); backdrop-filter: blur(28px); }
+    .sidebar-header { height: 64px; padding: 14px 20px; display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+    .sidebar-header img { width: 134px; height: auto; }
+    .sidebar-nav { padding: 22px 12px; }
+    .nav-label { margin: 0 12px 10px; color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .nav-item { display: flex; align-items: center; gap: 12px; height: 46px; margin: 3px 0; padding: 0 13px; color: var(--text-subtle); border-radius: 8px; text-decoration: none; font-size: 14px; transition: background .2s, color .2s; }
+    .nav-item:hover, .nav-item.active { color: var(--accent); background: var(--accent-soft); }
+    .nav-icon { width: 20px; color: currentColor; font-size: 17px; text-align: center; }
+    .sidebar-footer { display: flex; align-items: center; gap: 12px; padding: 0 25px; color: var(--text-subtle); border-top: 1px solid var(--border); font-size: 14px; cursor: pointer; }
+    .sidebar-footer:hover { color: var(--danger); background: var(--danger-soft); }
+    .layout-content { grid-column: 2; min-width: 0; }
+    .main-header { position: sticky; z-index: 1; top: 0; height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; background: rgba(255,255,255,.68); border-bottom: 1px solid rgba(71,85,105,.1); backdrop-filter: blur(28px); }
+    .main-header h1 { margin: 0; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; }
+    .header-caption { color: var(--text-subtle); font-size: 13px; }
+    .main-container { max-width: 1480px; margin: 0 auto; padding: 28px 32px 56px; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+    .page-heading h2 { margin: 0 0 5px; font-size: 28px; letter-spacing: -.03em; }
+    .page-heading p { margin: 0; color: var(--text-subtle); font-size: 14px; }
+    .actions, .search { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 15px; color: #fff; background: var(--accent); border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; transition: filter .2s, transform .2s; }
+    .button:hover { filter: brightness(.95); transform: translateY(-1px); }
+    .button.secondary { color: var(--text-subtle); background: var(--surface); border: 1px solid var(--border); }
+    .button.danger { color: var(--danger); background: var(--danger-soft); border: 1px solid #fecdca; }
+    .small-button { min-height: 34px; padding: 0 11px; font-size: 12px; }
+    .card { padding: 24px; background: var(--surface); border: 1px solid rgba(71,85,105,.08); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,24,69,.025); }
+    .card + .card { margin-top: 18px; }
+    .filter-card { margin-bottom: 18px; }
+    .search { justify-content: space-between; }
+    .search .search-main { display: flex; flex: 1 1 360px; gap: 10px; max-width: 680px; }
+    .search .search-main input { margin: 0; }
+    .search select { width: 190px; margin: 0; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 12px 15px; color: var(--text-subtle); background: var(--surface-soft); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; text-align: left; white-space: nowrap; }
+    td { padding: 15px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 14px; }
+    tbody tr { transition: background .2s; }
+    tbody tr:hover { background: #f8fbfd; }
+    tbody tr:last-child td { border-bottom: 0; }
+    td.answer, .message-body { max-width: 520px; color: #344054; white-space: pre-wrap; line-height: 1.5; }
+    .id { color: var(--accent); font-weight: 700; }
+    .status { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 16px; color: var(--success); background: var(--success-soft); font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .status.wait { color: var(--warning); background: var(--warning-soft); }
+    .status.closed, .status.off { color: var(--text-subtle); background: #f2f4f7; }
+    .status.blocked { color: var(--danger); background: var(--danger-soft); }
+    .inactive { opacity: .58; }
+    .empty { padding: 58px 20px; color: var(--text-subtle); text-align: center; }
+    .empty-icon { display: block; margin: 0 auto 14px; color: #b8c5cf; font-size: 38px; }
+    .request-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .request-top h2 { margin: 0 0 7px; font-size: 22px; }
+    .message { margin: 12px 0; padding: 13px 16px; background: #f8fafc; border-left: 3px solid #98a2b3; border-radius: 0 8px 8px 0; }
+    .message.user { border-color: #60a5fa; background: #f5f9ff; }
+    .message.bot { border-color: #12b76a; background: #f2fdf7; }
+    .message.employee { border-color: #f79009; background: #fffbf5; }
+    .message-meta { margin-bottom: 6px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+    .form-card { max-width: 900px; }
+    .form-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .manual-form { display: grid; grid-template-columns: 180px 220px minmax(180px, 1fr) auto; gap: 10px; align-items: center; }
+    .manual-form input, .manual-form select { margin: 0; }
+    .check-label { display: flex; align-items: center; gap: 9px; color: var(--text-subtle); font-size: 14px; }
+    .check-label input { width: auto; }
+    @media (max-width: 980px) { .admin-shell { grid-template-columns: 216px minmax(0, 1fr); } .sidebar { width: 216px; } .main-container { padding-inline: 20px; } .main-header { padding-inline: 20px; } .manual-form { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 720px) { .admin-shell { display: block; } .sidebar { position: static; width: 100%; display: block; } .sidebar-header { justify-content: center; } .sidebar-nav { display: flex; gap: 5px; padding: 8px; overflow-x: auto; } .nav-label { display: none; } .nav-item { flex: 0 0 auto; height: 40px; padding: 0 11px; } .sidebar-footer { height: 44px; padding: 0 14px; border-top: 1px solid var(--border); } .layout-content { width: 100%; } .main-header { position: static; } .main-container { padding: 20px 14px 40px; } .page-heading { flex-direction: column; } .manual-form { display: flex; flex-direction: column; align-items: stretch; } .manual-form .button { width: 100%; } }
+  </style>
+</head>
+<body>
+{% macro csrf_input() %}<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">{% endmacro %}
+{% if page == 'login' %}
+  <main class="login-page">
+    <section class="login-card">
+      <img src="/static/logo.svg" alt="Logo">
+      <h1>Админ-панель</h1>
+      <p class="muted">Управление поддержкой Telegram-бота</p>
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <form method="post" action="/admin/login">{{ csrf_input() }}
+        <label class="field-label">Логин</label>
+        <input type="text" name="login_name" required autofocus placeholder="Введите логин">
+        <label class="field-label">Пароль</label>
+        <input type="password" name="password" required placeholder="Введите пароль">
+        <button class="button" style="width:100%;margin-top:20px" type="submit">Войти</button>
+      </form>
+    </section>
+  </main>
+{% else %}
+  <div class="admin-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header"><a href="/admin/requests"><img src="/static/logo.svg" alt="Logo"></a></div>
+      <nav class="sidebar-nav">
+        <p class="nav-label">Рабочее пространство</p>
+        <a class="nav-item {% if page in ['requests', 'request_detail'] %}active{% endif %}" href="/admin/requests"><span class="nav-icon">▤</span><span>Запросы</span></a>
+        {% if not request.state.employee or request.state.employee.role != 'operator' %}<a class="nav-item {% if page in ['list', 'form'] %}active{% endif %}" href="/admin/faq"><span class="nav-icon">◈</span><span>База знаний</span></a>
+        <a class="nav-item {% if page == 'users_groups' %}active{% endif %}" href="/admin/users-groups"><span class="nav-icon">◎</span><span>Пользователи и группы</span></a>{% endif %}
+        {% if request.state.employee and request.state.employee.role != 'operator' %}<a class="nav-item {% if page in ['employees', 'employee_form'] %}active{% endif %}" href="/admin/employees"><span class="nav-icon">♙</span><span>Сотрудники</span></a>{% endif %}
+      </nav>
+      <form method="post" action="/admin/logout">{{ csrf_input() }}<button class="sidebar-footer" type="submit"><span class="nav-icon">↪</span><span>Выйти</span></button></form>
+    </aside>
+    <div class="layout-content">
+      <header class="main-header"><h1>{% if page in ['employees', 'employee_form'] %}Сотрудники{% elif page == 'users_groups' %}Пользователи и Подключенные группы{% elif page in ['requests', 'request_detail'] %}Запросы клиентов{% else %}База знаний FAQ{% endif %}</h1><span class="header-caption">{% if request.state.employee %}{{ request.state.employee.first_name }} {{ request.state.employee.last_name }} · {% if request.state.employee.role == 'admin' %}Админ{% elif request.state.employee.role == 'analyst' %}Аналитик{% else %}Оператор{% endif %}{% endif %}</span></header>
+      <main class="main-container">
+      {% if page == 'list' %}
+        <div class="page-heading"><div><h2>База знаний</h2><p>Активные записи используются ботом в ответах клиентам</p></div><a class="button" href="/admin/faq/new">＋ Добавить FAQ</a></div>
+        <div class="card filter-card"><form class="search" method="get" action="/admin/faq"><div class="search-main"><input name="q" value="{{ query }}" placeholder="Поиск по вопросу или ответу"><button class="button" type="submit">Найти</button></div></form></div>
+        <section class="card"><div class="table-wrap">{% if not items %}<div class="empty"><span class="empty-icon">◈</span>Пунктов FAQ пока нет.</div>{% else %}<table><thead><tr><th>ВОПРОС</th><th>КАНОНИЧЕСКИЙ ОТВЕТ</th><th>СТАТУС</th><th>ДЕЙСТВИЯ</th></tr></thead><tbody>{% for item in items %}<tr class="{% if not item.is_active %}inactive{% endif %}"><td><strong>{{ item.question }}</strong></td><td class="answer">{{ item.answer }}</td><td><span class="status {% if not item.is_active %}off{% endif %}">{% if item.is_active %}Активен{% else %}Выключен{% endif %}</span></td><td><div class="actions"><a class="button secondary small-button" href="/admin/faq/{{ item.id }}/edit">Изменить</a><form method="post" action="/admin/faq/{{ item.id }}/delete" onsubmit="return confirm('Удалить этот пункт FAQ?')">{{ csrf_input() }}<button class="button danger small-button">Удалить</button></form></div></td></tr>{% endfor %}</tbody></table>{% endif %}</div></section>
+      {% elif page == 'requests' %}
+        <div class="page-heading"><div><h2>Запросы клиентов</h2><p>Каждый вопрос и фактический ответ сохраняются как отдельная заявка</p></div></div>
+        <div class="card filter-card"><form class="search" method="get" action="/admin/requests"><div class="search-main"><input name="q" value="{{ query }}" placeholder="Поиск по вопросу или клиенту"><select name="kind"><option value="" {% if kind == '' %}selected{% endif %}>Все запросы</option><option value="manual" {% if kind == 'manual' %}selected{% endif %}>Мануальные запросы</option><option value="auto" {% if kind == 'auto' %}selected{% endif %}>Автоответы</option></select><select name="status"><option value="">Все статусы</option><option value="open" {% if status == 'open' %}selected{% endif %}>Открытые</option><option value="waiting_employee" {% if status == 'waiting_employee' %}selected{% endif %}>Ждут сотрудника</option><option value="answered" {% if status == 'answered' %}selected{% endif %}>Отвеченные</option><option value="closed" {% if status == 'closed' %}selected{% endif %}>Закрытые</option></select><button class="button" type="submit">Найти</button></div></form></div>
+        <section class="card"><div class="table-wrap">{% if not items %}<div class="empty"><span class="empty-icon">▤</span>Запросов пока нет.</div>{% else %}<table><thead><tr><th>№</th><th>КЛИЕНТ</th><th>ЗАПРОС</th><th>СТАТУС</th><th>СОЗДАНА</th><th></th></tr></thead><tbody>{% for item in items %}<tr><td class="id">#{{ item.id }}{% if item.is_auto_answer %}<br><span class="status" style="margin-top:6px;color:#027a48;background:#ecfdf3">Автоответ</span>{% else %}<br><span class="status closed" style="margin-top:6px">Мануальный</span>{% endif %}</td><td><strong>{{ item.user_label }}</strong><br><span class="muted">ID {{ item.user_id }}</span></td><td class="answer">{{ item.question }}</td><td><span class="status {% if item.status == 'waiting_employee' %}wait{% elif item.status == 'closed' %}closed{% endif %}">{{ item.status }}</span></td><td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td><a class="button secondary small-button" href="/admin/requests/{{ item.id }}">Открыть →</a></td></tr>{% endfor %}</tbody></table>{% endif %}</div></section>
+      {% elif page == 'request_detail' %}
+        <div class="page-heading"><div><h2>Заявка №{{ item.id }}</h2><p>{{ item.user_label }} · Telegram ID {{ item.user_id }} · чат {{ item.chat_id }}</p></div><a class="button secondary" href="/admin/requests">← Все запросы</a></div>
+        <section class="card"><div class="request-top"><div><strong>История переписки</strong><p class="muted">Все сообщения заявки в хронологическом порядке</p></div><div class="actions">{% if item.is_auto_answer %}<span class="status" style="color:#027a48;background:#ecfdf3">Автоответ</span>{% else %}<span class="status closed">Мануальный запрос</span>{% endif %}<span class="status {% if item.status == 'waiting_employee' %}wait{% elif item.status == 'closed' %}closed{% endif %}">{{ item.status }}</span></div></div>{% if error %}<div class="error">{{ error }}</div>{% endif %}{% for message in messages %}<div class="message {{ message.author_role }}"><div class="message-meta">{{ message.author_role }} · {{ message.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</div><div class="message-body">{{ message.body }}</div></div>{% endfor %}{% if request.state.employee and request.state.employee.role in ['admin', 'operator'] and item.status != 'closed' %}<form method="post" action="/admin/requests/{{ item.id }}/reply">{{ csrf_input() }}<label class="field-label">Ответ сотрудника</label><textarea name="body" required placeholder="Введите ответ клиенту"></textarea><div class="form-actions"><button class="button" type="submit">Сохранить и отправить в Telegram</button></div></form>{% endif %}{% if request.state.employee and request.state.employee.role == 'admin' and item.status != 'closed' %}<form method="post" action="/admin/requests/{{ item.id }}/close" style="margin-top:10px">{{ csrf_input() }}<button class="button danger" type="submit">Закрыть заявку</button></form>{% endif %}</section>
+      {% elif page == 'employees' %}
+        <div class="page-heading"><div><h2>Сотрудники</h2><p>Отдельные учётные записи и права доступа сотрудников</p></div><a class="button" href="/admin/employees/new">＋ Добавить сотрудника</a></div>
+        <section class="card"><div class="table-wrap">{% if not employees %}<div class="empty">Сотрудников пока нет.</div>{% else %}<table><thead><tr><th>СОТРУДНИК</th><th>ДОЛЖНОСТЬ</th><th>РОЛЬ</th><th>ЛОГИН</th><th>ДЕЙСТВИЯ</th></tr></thead><tbody>{% for employee in employees %}<tr><td><strong>{{ employee.first_name }} {{ employee.last_name }}</strong></td><td>{{ employee.position }}</td><td><span class="status {% if employee.role == 'admin' %}wait{% elif employee.role == 'operator' %}closed{% endif %}">{% if employee.role == 'admin' %}Админ{% elif employee.role == 'analyst' %}Аналитик{% else %}Оператор{% endif %}</span></td><td class="id">{{ employee.login }}</td><td><div class="actions"><a class="button secondary small-button" href="/admin/employees/{{ employee.id }}/edit">Изменить</a>{% if request.state.employee.id != employee.id %}<form method="post" action="/admin/employees/{{ employee.id }}/delete" onsubmit="return confirm('Удалить сотрудника?')">{{ csrf_input() }}<button class="button danger small-button">Удалить</button></form>{% endif %}</div></td></tr>{% endfor %}</tbody></table>{% endif %}</div></section>
+      {% elif page == 'employee_form' %}
+        <div class="page-heading"><div><h2>{% if item %}Редактировать сотрудника{% else %}Новый сотрудник{% endif %}</h2><p>Логин используется для отдельного входа в админ-панель</p></div><a class="button secondary" href="/admin/employees">← К списку сотрудников</a></div>
+        <section class="card form-card">{% if error %}<div class="error">{{ error }}</div>{% endif %}<form method="post" action="{% if item %}/admin/employees/{{ item.id }}/edit{% else %}/admin/employees/new{% endif %}">{{ csrf_input() }}<label class="field-label">Имя</label><input name="first_name" value="{{ item.first_name if item else '' }}" required><label class="field-label">Фамилия</label><input name="last_name" value="{{ item.last_name if item else '' }}" required><label class="field-label">Должность</label><input name="position" value="{{ item.position if item else '' }}" required><label class="field-label">Роль</label><select name="role" required><option value="admin" {% if item and item.role == 'admin' %}selected{% endif %}>Админ</option><option value="analyst" {% if item and item.role == 'analyst' %}selected{% endif %}>Аналитик</option><option value="operator" {% if item and item.role == 'operator' %}selected{% endif %}>Оператор</option></select><label class="field-label">Telegram ID сотрудника</label><input name="telegram_id" type="number" value="{{ item.telegram_id if item and item.telegram_id else '' }}" placeholder="Например, 123456789"><label class="field-label">Логин</label><input name="login_name" value="{{ item.login if item else '' }}" required><label class="field-label">Пароль{% if item %} <span class="muted">(оставьте пустым, чтобы не менять)</span>{% endif %}</label><input type="password" name="password" {% if not item %}required{% endif %} minlength="6" placeholder="Минимум 6 символов"><div class="form-actions"><button class="button" type="submit">Сохранить сотрудника</button><a class="button secondary" href="/admin/employees">Отмена</a></div></form></section>
+      {% elif page == 'users_groups' %}
+        <div class="page-heading"><div><h2>Пользователи и Подключенные группы</h2><p>Контроль доступа к обработке заявок Telegram-ботом</p></div></div>
+        <section class="card filter-card"><h3 style="margin:0 0 5px">Добавить в чёрный список вручную</h3><p class="muted" style="margin:0 0 18px;font-size:13px">Заблокированная сущность получает фиксированное сообщение о нарушении политики использования.</p><form class="manual-form" method="post" action="/admin/entities/manual-block">{{ csrf_input() }}<select name="entity_type"><option value="user">Пользователь</option><option value="group">Группа</option></select><input name="entity_id" type="number" required placeholder="Telegram ID"><input name="title" placeholder="Название или комментарий"><button class="button danger" type="submit">Заблокировать</button></form></section>
+        <section class="card"><div class="page-heading" style="margin-bottom:12px"><div><h3 style="margin:0">Пользователи Telegram</h3><p>Пользователи, которые обращались к боту</p></div></div><div class="table-wrap">{% if not users %}<div class="empty">Пользователей пока нет.</div>{% else %}<table><thead><tr><th>ПОЛЬЗОВАТЕЛЬ</th><th>USERNAME</th><th>TELEGRAM ID</th><th>ПОСЛЕДНЯЯ АКТИВНОСТЬ</th><th>СТАТУС</th><th></th></tr></thead><tbody>{% for entity in users %}<tr><td><strong>{{ entity.title }}</strong></td><td>{{ '@' + entity.username if entity.username else '—' }}</td><td class="id">{{ entity.entity_id }}</td><td>{{ entity.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td><td><span class="status {% if entity.is_blocked %}blocked{% endif %}">{% if entity.is_blocked %}В чёрном списке{% else %}Разрешён{% endif %}</span></td><td>{% if entity.is_blocked %}<form method="post" action="/admin/entities/user/{{ entity.entity_id }}/unblock">{{ csrf_input() }}<button class="button secondary small-button">Разблокировать</button></form>{% else %}<form method="post" action="/admin/entities/user/{{ entity.entity_id }}/block" onsubmit="return confirm('Заблокировать пользователя?')">{{ csrf_input() }}<button class="button danger small-button">В чёрный список</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}</div></section>
+        <section class="card"><div class="page-heading" style="margin-bottom:12px"><div><h3 style="margin:0">Подключенные группы</h3><p>Группы и супергруппы, в которых работает бот</p></div></div><div class="table-wrap">{% if not groups %}<div class="empty">Групп пока нет. Они появятся после добавления бота или упоминания в группе.</div>{% else %}<table><thead><tr><th>ГРУППА</th><th>USERNAME</th><th>TELEGRAM ID</th><th>ПОСЛЕДНЯЯ АКТИВНОСТЬ</th><th>СТАТУС</th><th></th></tr></thead><tbody>{% for entity in groups %}<tr><td><strong>{{ entity.title }}</strong></td><td>{{ '@' + entity.username if entity.username else '—' }}</td><td class="id">{{ entity.entity_id }}</td><td>{{ entity.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td><td><span class="status {% if entity.is_blocked %}blocked{% endif %}">{% if entity.is_blocked %}В чёрном списке{% else %}Разрешена{% endif %}</span></td><td>{% if entity.is_blocked %}<form method="post" action="/admin/entities/group/{{ entity.entity_id }}/unblock">{{ csrf_input() }}<button class="button secondary small-button">Разблокировать</button></form>{% else %}<form method="post" action="/admin/entities/group/{{ entity.entity_id }}/block" onsubmit="return confirm('Заблокировать группу?')">{{ csrf_input() }}<button class="button danger small-button">В чёрный список</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}</div></section>
+      {% else %}
+        <div class="page-heading"><div><h2>{% if item %}Редактировать FAQ{% else %}Добавить FAQ{% endif %}</h2><p>Канонический ответ, который бот использует после смыслового сопоставления</p></div><a class="button secondary" href="/admin/faq">← Назад к базе</a></div>
+        <section class="card form-card">{% if error %}<div class="error">{{ error }}</div>{% endif %}<form method="post" action="{% if item %}/admin/faq/{{ item.id }}/edit{% else %}/admin/faq/new{% endif %}">{{ csrf_input() }}<label class="field-label">Вопрос</label><input name="question" value="{{ item.question if item else '' }}" required><label class="field-label">Ответ</label><textarea name="answer" required>{{ item.answer if item else '' }}</textarea><label class="check-label"><input type="checkbox" name="is_active" value="true" {% if not item or item.is_active %}checked{% endif %}> Использовать в ответах бота</label><div class="form-actions"><button class="button" type="submit">Сохранить изменения</button><a class="button secondary" href="/admin/faq">Отмена</a></div></form></section>
+      {% endif %}
+      </main>
+    </div>
+  </div>
+{% endif %}
+</body>
+</html>
