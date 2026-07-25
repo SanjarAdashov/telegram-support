@@ -16,6 +16,8 @@ class SupportRequest:
     user_label: str
     chat_id: int
     chat_type: str
+    source_message_id: int | None
+    message_thread_id: int | None
     question: str
     language: str | None
     is_auto_answer: bool
@@ -78,6 +80,8 @@ class SupportStore:
                     user_label TEXT NOT NULL,
                     chat_id BIGINT NOT NULL,
                     chat_type TEXT NOT NULL,
+                    source_message_id BIGINT,
+                    message_thread_id BIGINT,
                     question TEXT NOT NULL,
                     language TEXT,
                     is_auto_answer BOOLEAN NOT NULL DEFAULT FALSE,
@@ -100,6 +104,10 @@ class SupportStore:
                     ON support_messages(request_id, created_at);
                 ALTER TABLE support_requests
                     ADD COLUMN IF NOT EXISTS is_auto_answer BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE support_requests
+                    ADD COLUMN IF NOT EXISTS source_message_id BIGINT;
+                ALTER TABLE support_requests
+                    ADD COLUMN IF NOT EXISTS message_thread_id BIGINT;
                 CREATE INDEX IF NOT EXISTS support_requests_type_idx
                     ON support_requests(is_auto_answer, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS employees (
@@ -143,14 +151,26 @@ class SupportStore:
     def _message(row: dict[str, Any] | None) -> SupportMessage | None:
         return SupportMessage(**row) if row else None
 
-    def create_request(self, user_id: int, user_label: str, chat_id: int, chat_type: str, question: str) -> SupportRequest:
+    def create_request(
+        self,
+        user_id: int,
+        user_label: str,
+        chat_id: int,
+        chat_type: str,
+        question: str,
+        source_message_id: int | None = None,
+        message_thread_id: int | None = None,
+    ) -> SupportRequest:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                INSERT INTO support_requests(user_id, user_label, chat_id, chat_type, question)
-                VALUES (%s, %s, %s, %s, %s) RETURNING *
+                INSERT INTO support_requests(
+                    user_id, user_label, chat_id, chat_type,
+                    source_message_id, message_thread_id, question
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *
                 """,
-                (user_id, user_label, chat_id, chat_type, question),
+                (user_id, user_label, chat_id, chat_type, source_message_id, message_thread_id, question),
             ).fetchone()
             connection.execute(
                 """
@@ -158,6 +178,45 @@ class SupportStore:
                 VALUES (%s, %s, 'user', %s)
                 """,
                 (row["id"], user_id, question),
+            )
+        return self._request(row)
+
+    def reply_to_request(self, request_id: int, author_id: int, body: str) -> SupportRequest | None:
+        """Append an employee reply or create a new follow-up if the request is closed."""
+        body = body.strip()
+        if not body:
+            return None
+        with self.connect() as connection:
+            parent = connection.execute("SELECT * FROM support_requests WHERE id=%s", (request_id,)).fetchone()
+            if not parent:
+                return None
+            if parent["status"] == "closed":
+                row = connection.execute(
+                    """
+                    INSERT INTO support_requests(
+                        user_id, user_label, chat_id, chat_type,
+                        source_message_id, message_thread_id, question, status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'answered')
+                    RETURNING *
+                    """,
+                    (
+                        parent["user_id"], parent["user_label"], parent["chat_id"], parent["chat_type"],
+                        parent["source_message_id"], parent["message_thread_id"],
+                        f"Продолжение заявки №{parent['id']}",
+                    ),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "UPDATE support_requests SET status='answered', updated_at=NOW() WHERE id=%s RETURNING *",
+                    (request_id,),
+                ).fetchone()
+            connection.execute(
+                """
+                INSERT INTO support_messages(request_id, author_id, author_role, body)
+                VALUES (%s, %s, 'employee', %s)
+                """,
+                (row["id"], author_id, body),
             )
         return self._request(row)
 

@@ -6,7 +6,9 @@ from support_bot import (
     message_targets_bot,
     normalize,
     parse_operator_ids,
+    request_id_from_reply,
     remove_bot_mention,
+    telegram_reply_kwargs,
 )
 
 
@@ -65,3 +67,21 @@ def test_private_messages_do_not_require_mention():
     update.message.text = "Вопрос"
 
     assert message_targets_bot(update, "support_bot") is True
+
+
+def test_operator_reply_extracts_request_id_from_notification():
+    class Message:
+        text = "Заявка №417\nКлиент: user"
+
+    assert request_id_from_reply(Message()) == 417
+
+
+def test_operator_reply_uses_original_telegram_message_and_topic():
+    class Request:
+        source_message_id = 902
+        message_thread_id = 17
+
+    assert telegram_reply_kwargs(Request()) == {
+        "reply_to_message_id": 902,
+        "message_thread_id": 17,
+    }

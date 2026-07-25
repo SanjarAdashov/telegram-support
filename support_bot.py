@@ -251,6 +251,36 @@ def remove_bot_mention(text: str, bot_username: str | None) -> str:
     ).strip()
 
 
+def request_id_from_reply(message) -> int | None:
+    text = (getattr(message, "text", None) or getattr(message, "caption", None) or "")
+    match = re.search(r"Заявка №(\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def telegram_reply_kwargs(request) -> dict[str, int]:
+    kwargs: dict[str, int] = {}
+    if request.source_message_id is not None:
+        kwargs["reply_to_message_id"] = request.source_message_id
+    if request.message_thread_id is not None:
+        kwargs["message_thread_id"] = request.message_thread_id
+    return kwargs
+
+
+async def send_operator_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int, body: str) -> bool:
+    if not update.effective_user:
+        return False
+    store = get_store(context)
+    target = store.reply_to_request(request_id, update.effective_user.id, body)
+    if not target:
+        return False
+    await context.bot.send_message(
+        chat_id=target.chat_id,
+        text=f"Ответ сотрудника по заявке №{target.id}:\n{body.strip()}",
+        **telegram_reply_kwargs(target),
+    )
+    return True
+
+
 ESCALATION_MESSAGE = (
     "К сожалению, я сам не могу ответить на ваш вопрос. "
     "В ближайшее время наши специалисты обработают запрос и ответят!"
@@ -276,6 +306,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     user = update.effective_user
     chat = update.effective_chat
+    if user.id in context.application.bot_data["operator_ids"] and update.message.reply_to_message:
+        request_id = request_id_from_reply(update.message.reply_to_message)
+        if request_id:
+            try:
+                sent = await send_operator_reply(update, context, request_id, update.message.text or "")
+                await update.message.reply_text(
+                    "Ответ сохранён и отправлен клиенту." if sent else "Заявка не найдена.",
+                )
+            except Exception:
+                LOGGER.exception("Не удалось отправить ответ оператора через reply")
+                await update.message.reply_text("Ответ сохранён, но не отправлен клиенту.")
+            return
     label = user.username or user.full_name or str(user.id)
     store = get_store(context)
     store.register_entity("user", user.id, user.full_name or str(user.id), user.username)
@@ -292,7 +334,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ):
         await update.message.reply_text(POLICY_ERROR_MESSAGE, **reply_kwargs)
         return
-    request = store.create_request(user.id, label, chat.id, chat.type, question)
+    request = store.create_request(
+        user.id,
+        label,
+        chat.id,
+        chat.type,
+        question,
+        source_message_id=update.message.message_id,
+        message_thread_id=getattr(update.message, "message_thread_id", None),
+    )
     answer, language = await context.application.bot_data["chatgpt"].answer_with_language(question)
     store.set_language(request.id, language)
     store.set_auto_answer(request.id, bool(answer))
@@ -329,15 +379,17 @@ async def reply_to_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("Формат: /reply <номер обращения> <текст>")
         return
     ticket = get_store(context).get(int(context.args[0]))
-    if not ticket or ticket.status == "closed":
-        await update.message.reply_text("Открытая заявка с таким номером не найдена.")
+    if not ticket:
+        await update.message.reply_text("Заявка с таким номером не найдена.")
         return
     body = " ".join(context.args[1:])
-    store = get_store(context)
-    store.add_message(ticket.id, update.effective_user.id, "employee", body)
-    store.set_status(ticket.id, "answered")
-    await context.bot.send_message(ticket.chat_id, f"Ответ сотрудника по заявке №{ticket.id}:\n{body}")
-    await update.message.reply_text("Ответ сохранён и отправлен клиенту.")
+    try:
+        sent = await send_operator_reply(update, context, ticket.id, body)
+    except Exception:
+        LOGGER.exception("Не удалось отправить ответ оператора по заявке %s", ticket.id)
+        await update.message.reply_text("Ответ сохранён, но не отправлен клиенту.")
+        return
+    await update.message.reply_text("Ответ сохранён и отправлен клиенту." if sent else "Заявка не найдена.")
 
 
 async def close_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

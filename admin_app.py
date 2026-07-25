@@ -399,11 +399,21 @@ async def request_reply(request: Request, request_id: int, csrf_token: str = For
             {"request": request, "page": "request_detail", "item": item, "messages": request_store.messages(request_id), "error": "TELEGRAM_BOT_TOKEN не настроен"},
             status_code=500,
         )
-    request_store.add_message(request_id, employee.id, "employee", body.strip())
-    request_store.set_status(request_id, "answered")
     try:
+        target = request_store.reply_to_request(request_id, employee.id, body)
+        if not target:
+            return RedirectResponse("/admin/requests", status_code=303)
+        telegram_kwargs = {}
+        if target.source_message_id is not None:
+            telegram_kwargs["reply_to_message_id"] = target.source_message_id
+        if target.message_thread_id is not None:
+            telegram_kwargs["message_thread_id"] = target.message_thread_id
         async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
-            await bot.send_message(chat_id=item.chat_id, text=f"Ответ сотрудника по заявке №{item.id}:\n{body.strip()}")
+            await bot.send_message(
+                chat_id=target.chat_id,
+                text=f"Ответ сотрудника по заявке №{target.id}:\n{body.strip()}",
+                **telegram_kwargs,
+            )
     except Exception:
         LOGGER.exception("Не удалось отправить ответ в Telegram")
         return templates.TemplateResponse(
@@ -412,7 +422,7 @@ async def request_reply(request: Request, request_id: int, csrf_token: str = For
             {"request": request, "page": "request_detail", "item": item, "messages": request_store.messages(request_id), "error": "Ответ сохранён, но не отправлен в Telegram"},
             status_code=502,
         )
-    return RedirectResponse(f"/admin/requests/{request_id}", status_code=303)
+    return RedirectResponse(f"/admin/requests/{target.id}", status_code=303)
 
 
 @app.post("/admin/requests/{request_id}/close")
