@@ -24,6 +24,7 @@ class SupportRequest:
     status: str
     created_at: datetime
     updated_at: datetime
+    latest_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,9 @@ class SupportMessage:
     author_id: int
     author_role: str
     body: str
+    telegram_chat_id: int | None
+    telegram_message_id: int | None
+    message_thread_id: int | None
     created_at: datetime
 
 
@@ -96,6 +100,9 @@ class SupportStore:
                     author_id BIGINT NOT NULL,
                     author_role TEXT NOT NULL CHECK (author_role IN ('user', 'bot', 'employee')),
                     body TEXT NOT NULL,
+                    telegram_chat_id BIGINT,
+                    telegram_message_id BIGINT,
+                    message_thread_id BIGINT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 CREATE INDEX IF NOT EXISTS support_requests_status_idx
@@ -108,6 +115,15 @@ class SupportStore:
                     ADD COLUMN IF NOT EXISTS source_message_id BIGINT;
                 ALTER TABLE support_requests
                     ADD COLUMN IF NOT EXISTS message_thread_id BIGINT;
+                ALTER TABLE support_messages
+                    ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT;
+                ALTER TABLE support_messages
+                    ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT;
+                ALTER TABLE support_messages
+                    ADD COLUMN IF NOT EXISTS message_thread_id BIGINT;
+                CREATE INDEX IF NOT EXISTS support_messages_telegram_idx
+                    ON support_messages(telegram_chat_id, telegram_message_id)
+                    WHERE telegram_chat_id IS NOT NULL AND telegram_message_id IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS support_requests_type_idx
                     ON support_requests(is_auto_answer, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS employees (
@@ -174,10 +190,13 @@ class SupportStore:
             ).fetchone()
             connection.execute(
                 """
-                INSERT INTO support_messages(request_id, author_id, author_role, body)
-                VALUES (%s, %s, 'user', %s)
+                INSERT INTO support_messages(
+                    request_id, author_id, author_role, body,
+                    telegram_chat_id, telegram_message_id, message_thread_id
+                )
+                VALUES (%s, %s, 'user', %s, %s, %s, %s)
                 """,
-                (row["id"], user_id, question),
+                (row["id"], user_id, question, chat_id, source_message_id, message_thread_id),
             )
         return self._request(row)
 
@@ -220,16 +239,83 @@ class SupportStore:
             )
         return self._request(row)
 
-    def add_message(self, request_id: int, author_id: int, author_role: str, body: str) -> SupportMessage:
+    def link_latest_message(
+        self,
+        request_id: int,
+        author_id: int,
+        body: str,
+        telegram_chat_id: int,
+        telegram_message_id: int,
+        message_thread_id: int | None = None,
+    ) -> bool:
+        with self.connect() as connection:
+            result = connection.execute(
+                """
+                UPDATE support_messages
+                SET telegram_chat_id=%s, telegram_message_id=%s, message_thread_id=%s
+                WHERE id=(
+                    SELECT id FROM support_messages
+                    WHERE request_id=%s AND author_id=%s AND author_role='employee' AND body=%s
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+                """,
+                (telegram_chat_id, telegram_message_id, message_thread_id, request_id, author_id, body),
+            )
+        return result.rowcount == 1
+
+    def add_message(
+        self,
+        request_id: int,
+        author_id: int,
+        author_role: str,
+        body: str,
+        telegram_chat_id: int | None = None,
+        telegram_message_id: int | None = None,
+        message_thread_id: int | None = None,
+    ) -> SupportMessage:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                INSERT INTO support_messages(request_id, author_id, author_role, body)
-                VALUES (%s, %s, %s, %s) RETURNING *
+                INSERT INTO support_messages(
+                    request_id, author_id, author_role, body,
+                    telegram_chat_id, telegram_message_id, message_thread_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *
                 """,
-                (request_id, author_id, author_role, body),
+                (request_id, author_id, author_role, body, telegram_chat_id, telegram_message_id, message_thread_id),
             ).fetchone()
             connection.execute("UPDATE support_requests SET updated_at=NOW() WHERE id=%s", (request_id,))
+        return self._message(row)
+
+    def add_user_message(
+        self,
+        request_id: int,
+        user_id: int,
+        body: str,
+        source_message_id: int,
+        message_thread_id: int | None = None,
+    ) -> SupportMessage:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO support_messages(
+                    request_id, author_id, author_role, body,
+                    telegram_chat_id, telegram_message_id, message_thread_id
+                )
+                VALUES (%s, %s, 'user', %s, %s, %s, %s) RETURNING *
+                """,
+                (request_id, user_id, body, None, source_message_id, message_thread_id),
+            ).fetchone()
+            connection.execute(
+                """
+                UPDATE support_requests
+                SET source_message_id=%s, message_thread_id=%s,
+                    status='waiting_employee', updated_at=NOW()
+                WHERE id=%s
+                """,
+                (source_message_id, message_thread_id, request_id),
+            )
         return self._message(row)
 
     def set_language(self, request_id: int, language: str | None) -> None:
@@ -248,10 +334,43 @@ class SupportStore:
             result = connection.execute("UPDATE support_requests SET status=%s, updated_at=NOW() WHERE id=%s", (status, request_id))
         return result.rowcount == 1
 
+    def get_active_for_message(self, user_id: int, chat_id: int, chat_type: str) -> SupportRequest | None:
+        """Return the active request for a private user or a whole group chat."""
+        if chat_type in {"group", "supergroup"}:
+            condition = "chat_id=%s"
+            params = (chat_id,)
+        else:
+            condition = "chat_id=%s AND user_id=%s"
+            params = (chat_id, user_id)
+        with self.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT * FROM support_requests
+                WHERE {condition} AND status <> 'closed'
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+        return self._request(row)
+
     def get(self, request_id: int) -> SupportRequest | None:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM support_requests WHERE id=%s", (request_id,)).fetchone()
         return self._request(row)
+
+    def find_message_by_telegram(self, chat_id: int, message_id: int) -> SupportMessage | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM support_messages
+                WHERE telegram_chat_id=%s AND telegram_message_id=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (chat_id, message_id),
+            ).fetchone()
+        return self._message(row)
 
     def messages(self, request_id: int) -> list[SupportMessage]:
         with self.connect() as connection:
@@ -260,14 +379,30 @@ class SupportStore:
             ).fetchall()
         return [self._message(row) for row in rows]
 
-    def list(self, search: str = "", status: str = "", kind: str = "") -> list[SupportRequest]:
-        query = "SELECT * FROM support_requests WHERE TRUE"
+    def list(self, search: str = "", status: str = "active", kind: str = "") -> list[SupportRequest]:
+        query = """
+            SELECT sr.*,
+                   COALESCE(
+                       (
+                           SELECT sm.body
+                           FROM support_messages sm
+                           WHERE sm.request_id = sr.id
+                           ORDER BY sm.created_at DESC, sm.id DESC
+                           LIMIT 1
+                       ),
+                       sr.question
+                   ) AS latest_message
+            FROM support_requests sr
+            WHERE TRUE
+        """
         params: list[Any] = []
         if kind == "auto":
             query += " AND is_auto_answer=TRUE"
         elif kind == "manual":
             query += " AND is_auto_answer=FALSE"
-        if status:
+        if status == "active":
+            query += " AND status <> 'closed'"
+        elif status in {"open", "waiting_employee", "answered", "closed"}:
             query += " AND status=%s"
             params.append(status)
         if search.strip():

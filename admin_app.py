@@ -344,9 +344,13 @@ async def faq_delete(request: Request, item_id: int, csrf_token: str = Form(...)
 
 
 @app.get("/admin/requests", response_class=HTMLResponse)
-async def request_list(request: Request, q: str = "", status: str = "", kind: str | None = None):
+async def request_list(request: Request, q: str = "", status: str | None = None, kind: str | None = None):
     if not authenticated(request):
         return login_redirect()
+    if status is None:
+        status = "active"
+    if status not in {"active", "", "open", "waiting_employee", "answered", "closed"}:
+        status = "active"
     if kind is None:
         kind = "manual"
     if kind not in {"", "manual", "auto"}:
@@ -409,11 +413,19 @@ async def request_reply(request: Request, request_id: int, csrf_token: str = For
         if target.message_thread_id is not None:
             telegram_kwargs["message_thread_id"] = target.message_thread_id
         async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
-            await bot.send_message(
+            sent_message = await bot.send_message(
                 chat_id=target.chat_id,
                 text=f"Ответ сотрудника по заявке №{target.id}:\n{body.strip()}",
                 **telegram_kwargs,
             )
+        request_store.link_latest_message(
+            target.id,
+            employee.id,
+            body.strip(),
+            target.chat_id,
+            sent_message.message_id,
+            getattr(sent_message, "message_thread_id", None),
+        )
     except Exception:
         LOGGER.exception("Не удалось отправить ответ в Telegram")
         return templates.TemplateResponse(

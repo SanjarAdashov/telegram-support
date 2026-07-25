@@ -273,18 +273,78 @@ async def send_operator_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     target = store.reply_to_request(request_id, update.effective_user.id, body)
     if not target:
         return False
-    await context.bot.send_message(
+    sent_message = await context.bot.send_message(
         chat_id=target.chat_id,
         text=f"Ответ сотрудника по заявке №{target.id}:\n{body.strip()}",
         **telegram_reply_kwargs(target),
     )
+    store.link_latest_message(
+        target.id,
+        update.effective_user.id,
+        body.strip(),
+        target.chat_id,
+        sent_message.message_id,
+        getattr(sent_message, "message_thread_id", None),
+    )
     return True
 
 
-ESCALATION_MESSAGE = (
-    "К сожалению, я сам не могу ответить на ваш вопрос. "
-    "В ближайшее время наши специалисты обработают запрос и ответят!"
-)
+def route_reply_request(
+    store: SupportStore,
+    user_id: int,
+    user_label: str,
+    chat_id: int,
+    chat_type: str,
+    question: str,
+    replied_message_id: int,
+    source_message_id: int,
+    message_thread_id: int | None,
+):
+    replied = store.find_message_by_telegram(chat_id, replied_message_id)
+    if not replied or replied.author_role not in {"bot", "employee"}:
+        return None
+    parent = store.get(replied.request_id)
+    if not parent:
+        return None
+    if parent.status == "closed":
+        return store.create_request(
+            user_id,
+            user_label,
+            chat_id,
+            chat_type,
+            question,
+            source_message_id=source_message_id,
+            message_thread_id=message_thread_id,
+        )
+    store.add_user_message(parent.id, user_id, question, source_message_id, message_thread_id)
+    return parent
+
+
+def route_incoming_request(
+    store: SupportStore,
+    user_id: int,
+    user_label: str,
+    chat_id: int,
+    chat_type: str,
+    question: str,
+    source_message_id: int,
+    message_thread_id: int | None,
+):
+    request = store.get_active_for_message(user_id, chat_id, chat_type)
+    if request:
+        store.add_user_message(request.id, user_id, question, source_message_id, message_thread_id)
+        return request
+    return store.create_request(
+        user_id,
+        user_label,
+        chat_id,
+        chat_type,
+        question,
+        source_message_id=source_message_id,
+        message_thread_id=message_thread_id,
+    )
+
+
 POLICY_ERROR_MESSAGE = "Бот не может обрабатывать ваши заявки в связи с нарушением политики использования."
 
 
@@ -301,12 +361,14 @@ async def track_bot_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_user or not update.effective_chat:
         return
-    bot_username = context.bot.username
-    if not message_targets_bot(update, bot_username):
-        return
     user = update.effective_user
     chat = update.effective_chat
-    if user.id in context.application.bot_data["operator_ids"] and update.message.reply_to_message:
+    store = get_store(context)
+    bot_username = context.bot.username
+    is_reply = update.message.reply_to_message is not None
+    if not is_reply and not message_targets_bot(update, bot_username):
+        return
+    if user.id in context.application.bot_data["operator_ids"] and is_reply:
         request_id = request_id_from_reply(update.message.reply_to_message)
         if request_id:
             try:
@@ -319,7 +381,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text("Ответ сохранён, но не отправлен клиенту.")
             return
     label = user.username or user.full_name or str(user.id)
-    store = get_store(context)
     store.register_entity("user", user.id, user.full_name or str(user.id), user.username)
     if chat.type in {"group", "supergroup"}:
         store.register_entity("group", chat.id, chat.title or str(chat.id), chat.username)
@@ -334,41 +395,60 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ):
         await update.message.reply_text(POLICY_ERROR_MESSAGE, **reply_kwargs)
         return
-    request = store.create_request(
-        user.id,
-        label,
-        chat.id,
-        chat.type,
-        question,
-        source_message_id=update.message.message_id,
-        message_thread_id=getattr(update.message, "message_thread_id", None),
-    )
+    if is_reply:
+        request = route_reply_request(
+            store,
+            user.id,
+            label,
+            chat.id,
+            chat.type,
+            question,
+            update.message.reply_to_message.message_id,
+            update.message.message_id,
+            getattr(update.message, "message_thread_id", None),
+        )
+        if not request:
+            return
+    else:
+        request = route_incoming_request(
+            store,
+            user.id,
+            label,
+            chat.id,
+            chat.type,
+            question,
+            update.message.message_id,
+            getattr(update.message, "message_thread_id", None),
+        )
     answer, language = await context.application.bot_data["chatgpt"].answer_with_language(question)
     store.set_language(request.id, language)
     store.set_auto_answer(request.id, bool(answer))
     if answer:
-        store.add_message(request.id, context.bot.id, "bot", answer)
+        sent_message = await update.message.reply_text(answer, **reply_kwargs)
+        store.add_message(
+            request.id,
+            context.bot.id,
+            "bot",
+            answer,
+            chat.id,
+            sent_message.message_id,
+            getattr(sent_message, "message_thread_id", None),
+        )
         store.set_status(request.id, "answered")
-        await update.message.reply_text(answer, **reply_kwargs)
-        bot_copy = answer
     else:
-        localized_escalation = await context.application.bot_data["chatgpt"].translate(
-            ESCALATION_MESSAGE, language
-        ) or ESCALATION_MESSAGE
-        store.add_message(request.id, context.bot.id, "bot", localized_escalation)
         store.set_status(request.id, "waiting_employee")
-        await update.message.reply_text(localized_escalation, **reply_kwargs)
-        bot_copy = localized_escalation
-    notice = (
-        f"Заявка №{request.id}\nКлиент: {label} (ID {user.id})\n"
-        f"Тип чата: {chat.type}\nЗапрос: {question}\nОтвет бота: {bot_copy}\n"
-        f"Ответить в админке: http://127.0.0.1:8001/admin/requests/{request.id}"
-    )
-    for operator_id in context.application.bot_data["operator_ids"]:
-        try:
-            await context.bot.send_message(operator_id, notice)
-        except Exception:
-            LOGGER.exception("Не удалось уведомить оператора %s", operator_id)
+    if not answer:
+        notice = (
+            f"Заявка №{request.id}\nКлиент: {label} (ID {user.id})\n"
+            f"Тип чата: {chat.type}\nЗапрос: {question}\n"
+            "Автоматический ответ не сформирован; требуется ответ сотрудника.\n"
+            f"Ответить в админке: http://127.0.0.1:8001/admin/requests/{request.id}"
+        )
+        for operator_id in context.application.bot_data["operator_ids"]:
+            try:
+                await context.bot.send_message(operator_id, notice)
+            except Exception:
+                LOGGER.exception("Не удалось уведомить оператора %s", operator_id)
 
 
 async def reply_to_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
